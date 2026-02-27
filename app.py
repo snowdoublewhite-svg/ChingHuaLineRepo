@@ -7,19 +7,25 @@ import google.generativeai as genai
 
 app = Flask(__name__)
 
-# --- 【填空 A：填入你的密碼】 ---
-line_bot_api = LineBotApi('這裡貼上你的 LINE_CHANNEL_ACCESS_TOKEN')
-handler = WebhookHandler('這裡貼上你的 LINE_CHANNEL_SECRET')
-genai.configure(api_key="這裡貼上你的 GEMINI_API_KEY")
+# 1. 自動讀取您在 Render 設定的密碼
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+LINE_CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
-# --- 【填空 B：貼上你的三個 Gem 指令】 ---
-GEMS_CONFIG = {
-    "spiritual": '''這裡貼上【靈性諮詢】的 Gem 指令內容''',
-    "divination": '''這裡貼上【命理占卜】的 Gem 指令內容''',
-    "health": '''這裡貼上【健康分析】的 Gem 指令內容'''
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
+genai.configure(api_key=GEMINI_API_KEY)
+
+# 2. 自動讀取您在 Render 填寫的專業 Gem 指令
+# 如果讀不到，它會使用後面的簡短文字當作備份
+prompts = {
+    "靈性諮詢": os.getenv('PROMPT_SPIRITUAL', "你是專業的九宮數靈性諮詢師。"),
+    "命理占卜": os.getenv('PROMPT_FORTUNE', "你是精通命理占卜的大師。"),
+    "健康分析": os.getenv('PROMPT_HEALTH', "你是專業的數字健康顧問。")
 }
 
-user_sessions = {}
+# 預設模式
+current_mode = "靈性諮詢"
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -31,33 +37,33 @@ def callback():
         abort(400)
     return 'OK'
 
-@handler.add(MessageEvent, message=TextMessage)
+@handler.add(MessageEvent, filter_attribute=lambda e: isinstance(e.message, TextMessage))
 def handle_message(event):
-    user_id = event.source.user_id
+    global current_mode
     user_msg = event.message.text.strip()
 
-    # 切換大腦的關鍵字
-    if user_msg == "進入靈性諮詢":
-        user_sessions[user_id] = "spiritual"
+    # 圖文選單按鈕的切換邏輯
+    if "進入靈性諮詢" in user_msg:
+        current_mode = "靈性諮詢"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🔮 已切換至【靈性諮詢】模式"))
         return
-    elif user_msg == "進入命理占卜":
-        user_sessions[user_id] = "divination"
+    elif "進入命理占卜" in user_msg:
+        current_mode = "命理占卜"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🗓️ 已切換至【命理占卜】模式"))
         return
-    elif user_msg == "進入健康分析":
-        user_sessions[user_id] = "health"
+    elif "進入健康分析" in user_msg:
+        current_mode = "健康分析"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚖️ 已切換至【健康分析】模式"))
         return
 
-    # 沒選過的話預設用靈性諮詢
-    current_mode = user_sessions.get(user_id, "spiritual")
-    my_instruction = GEMS_CONFIG[current_mode]
-
-    model = genai.GenerativeModel(model_name="gemini-1.5-flash", system_instruction=my_instruction)
-    response = model.generate_content(user_msg)
-
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=response.text))
+    # 根據當前模式呼叫對應的 Gem 指令
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=prompts[current_mode])
+        response = model.generate_content(user_msg)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=response.text))
+    except Exception as e:
+        print(f"Error: {e}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="抱歉，我現在有點累了，請稍後再試。"))
 
 if __name__ == "__main__":
-    app.run()
+    app.run(host="0.0.0.0", port=10000)
