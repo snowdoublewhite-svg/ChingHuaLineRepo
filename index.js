@@ -1,18 +1,31 @@
 const express = require("express");
 const app = express();
 
-// LINE 會用 POST 打 webhook，內容是 JSON
-app.use(express.json());
+// 先把 raw body 留下來，避免某些情況解析出問題
+app.use(express.json({
+  verify: (req, res, buf) => { req.rawBody = buf?.toString("utf8") || ""; }
+}));
 
-// 健康檢查：用瀏覽器打開網址可以看到 OK
+// 任何 request 都先打一行 log（最重要）
+app.use((req, res, next) => {
+  console.log(`[REQ] ${req.method} ${req.path}`);
+  next();
+});
+
 app.get("/", (req, res) => res.status(200).send("OK"));
 
-// 你的 webhook endpoint（等下 LINE 後台要填這個）
-app.post("/webhook", (req, res) => {
-  // 先把收到的東西印出來（Render Logs 會看到）
-  console.log("Webhook body:", JSON.stringify(req.body));
+// 讓你用瀏覽器直接驗證 /webhook 有沒有到這個服務
+app.get("/webhook", (req, res) => {
+  console.log("[GET /webhook] hit");
+  res.status(200).send("WEBHOOK OK");
+});
 
-  // LINE 要你回 200，表示你收到了
+app.post("/webhook", (req, res) => {
+  console.log("[POST /webhook] body:", JSON.stringify(req.body));
+  // 如果解析不到 body，也把 rawBody 印出來
+  if (!req.body || Object.keys(req.body).length === 0) {
+    console.log("[POST /webhook] rawBody:", req.rawBody);
+  }
   return res.sendStatus(200);
 });
 
